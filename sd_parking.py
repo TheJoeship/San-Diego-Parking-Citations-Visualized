@@ -184,3 +184,13 @@ TOP_N = 50_000
 geocode_targets = loc_counts.head(TOP_N).index.tolist()
 print(f"Geocoding {TOP_N:,} locations covers "
       f"{loc_counts.head(TOP_N).sum() / len(df):.1%} of all tickets")
+
+#Write clean locations to targets.csv to be read by geocoder
+loc_counts = df["clean_location"].value_counts()
+targets = loc_counts.head(50_000).index.tolist()
+pd.Series(targets, name="address").to_csv("targets.csv", index=False)
+
+
+#Now finally save our cleaned version of the data as it's own parquet for use by the map
+df.to_parquet("citations_clean.parquet", index=False)
+print(f"Saved {len(df):,} cleaned rows -> citations_clean.parquet")

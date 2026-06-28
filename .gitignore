@@ -2,3 +2,7 @@
 venv/
 .venv/
 env/
+geocode_cache/
+*.parquet
+geocoded_locations.csv
+targets.csv
