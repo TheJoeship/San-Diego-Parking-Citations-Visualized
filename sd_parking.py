@@ -1,6 +1,7 @@
 from pathlib import Path
 import pandas as pd
 import re
+import random
 
 DATA_DIR = Path("data")
 csv_files = sorted(DATA_DIR.glob("*.csv"))
@@ -69,25 +70,71 @@ for top_n in [5_000, 10_000, 20_000, 50_000, 100_000]:
 
 
 ########################### Cleaning ###############################
+
+# Spelled-out ordinals -> numeric, so "THIRD AV" merges with "3RD AV".
+# San Diego's numbered avenues are a known finite set, so this is safe.
+ORDINALS = {
+    "FIRST": "1ST", "SECOND": "2ND", "THIRD": "3RD", "FOURTH": "4TH",
+    "FIFTH": "5TH", "SIXTH": "6TH", "SEVENTH": "7TH", "EIGHTH": "8TH",
+    "NINTH": "9TH", "TENTH": "10TH", "ELEVENTH": "11TH", "TWELFTH": "12TH",
+    "THIRTEENTH": "13TH", "FOURTEENTH": "14TH", "FIFTEENTH": "15TH",
+    "SIXTEENTH": "16TH", "SEVENTEENTH": "17TH", "EIGHTEENTH": "18TH",
+    "NINETEENTH": "19TH", "TWENTIETH": "20TH",
+}
+
 def clean_address(addr):
     s = addr.upper().strip()
-    s = s.replace(".", "")                              # "LN." -> "LN"
+    s = s.replace(".", " ")                                 # "N.MISSION" -> "N MISSION" (space, not nothing)
 
-    # strip enforcement tags that are noise at block level
-    s = re.sub(r'\b[NSEW]/ALLEY\b', '', s)              # E/ALLEY, W/ALLEY
-    s = re.sub(r'\b[NSEW]CL\b', '', s)                  # ECL, SCL (curb line)
-    s = re.sub(r'\b[NSEW]/[OLC]\b', '', s)              # N/O, W/L, C/L family
-    s = re.sub(r'\b(NORTH|SOUTH|EAST|WEST)BOUND\b', '', s)  # EASTBOUND
+    # --- Slash-anchored position tags (CURB/SIDE/SID/LOT with a slash) ---
+    # The mandatory "/" protects landmark words like "SKI BEACH LOT".
+    # CURB\s*LINE listed FIRST so "CURB LINE" matches fully (not just "CURB").
+    s = re.sub(
+        r'[NSEW]?\s*/\s*[NSEW]?\s*(CURB\s*LINE|CURBLINE|CURB|SIDE|SID|LOT)\b(\s+(LN|LANE|CTR|CENTER))?',
+        ' ', s,
+    )
 
-    # normalize the highest-impact street-type suffixes
+    # --- Spelled-out position tags: "EAST CURB LINE", "S SIDE", "W CURB" ---
+    # Anchored on a LEADING direction (word or single letter) so bare landmark
+    # words ("SKI BEACH LOT", "716 W UPAS ST") stay safe. CURB LINE first again.
+    s = re.sub(
+        r'\b(NORTH|SOUTH|EAST|WEST|N|S|E|W)\s+(CURB\s*LINE|CURB|SIDE|SID)\b',
+        ' ', s,
+    )
+
+    # --- Curb-line / directional / position tags (abbreviated forms) ---
+    s = re.sub(r'\b[NSEW]CL\b/?', '', s)                   # ECL, SCL, WCL, NCL
+    s = re.sub(r'\b[NSEW]/ALLEY\b', '', s)                 # E/ALLEY, W/ALLEY
+    s = re.sub(r'\b[NSEW]/A\b', '', s)                     # E/A, W/A (abbreviated alley)
+    s = re.sub(r'\b[NSEW]/[OLC]\b', '', s)                 # N/O, W/L, C/L family
+    s = re.sub(r'\b(NORTH|SOUTH|EAST|WEST)BOUND\b', '', s) # EASTBOUND etc.
+    s = re.sub(r'\bIFO\b', '', s)                          # "in front of" - landmark noise
+
+    # --- Spelled-out ordinals -> numeric ---
+    for word, num in ORDINALS.items():
+        s = re.sub(rf'\b{word}\b', num, s)
+
+    # --- Street-type suffix normalization ---
     s = re.sub(r'\bAVENUE\b', 'AV', s)
     s = re.sub(r'\bAVE\b', 'AV', s)
     s = re.sub(r'\bSTREET\b', 'ST', s)
-    s = re.sub(r'\bBOULEVARD\b', 'BL', s)
-    s = re.sub(r'\bBLVD\b', 'BL', s)
+    s = re.sub(r'\b(BOULEVARD|BLVD)\b', 'BL', s)
+    s = re.sub(r'\bDRIVE\b', 'DR', s)
+    s = re.sub(r'\bROAD\b', 'RD', s)
+    s = re.sub(r'\bCOURT\b', 'CT', s)
+    s = re.sub(r'\bLANE\b', 'LN', s)
+    s = re.sub(r'\bPLACE\b', 'PL', s)
+    s = re.sub(r'\bTERRACE\b', 'TER', s)
+    s = re.sub(r'\b(PARKWAY|PKWY)\b', 'PKWY', s)
+    s = re.sub(r'\bCIRCLE\b', 'CIR', s)
 
-    s = re.sub(r'\s+', ' ', s).strip()                 # collapse whitespace
+    # --- Final cleanup (order matters) ---
+    s = re.sub(r'\s*/\s*', ' ', s)                                              # orphaned slashes -> space
+    s = re.sub(r'\s+', ' ', s)                                                  # normalize whitespace FIRST
+    s = re.sub(r'\b(AV|ST|BL|DR|RD|CT|LN|PL|TER|CIR|PKWY)( \1\b)+', r' \1', s)  # collapse doubled suffixes
+    s = re.sub(r'\s+', ' ', s).strip()                                          # final tidy + strip
     return s
+
 
 #Clean UNIQUE strings only, then map back onto all rows
 unique_locs = df["location"].dropna().unique()
@@ -101,6 +148,39 @@ print("Unique cleaned locations:", df["clean_location"].nunique())
 changed = [(k, v) for k, v in cleaned_map.items() if k != v]
 print(f"{len(changed):,} of {len(cleaned_map):,} unique strings changed\n")
 
-import random
+#Random sample of 20 changes for analysis 
 for k, v in random.sample(changed, 20):
     print(f"{k!r:45} -> {v!r}")
+
+# Look specifically at strings still containing slashes or lone letters
+hits = [(k, v) for k, v in changed if '/' in v or re.search(r'\b[NSEW]\b', v)]
+print(f"{len(hits):,} strings still contain a slash or lone direction letter\n")
+
+for k, v in hits[:15]:          # only print the first 15
+    print(f"{k!r:45} -> {v!r}")
+
+
+#Working on regex parsing, check occurences of spelled out numbers beyond 20 (i.e "thirtieth")
+"""
+for word in ["TWENTY", "THIRTIETH", "FORTIETH", "FIFTIETH", "SIXTIETH", "SEVENTIETH"]:
+    n = df["location"].str.contains(rf'\b{word}', case=False, na=False).sum()
+    print(f"{word:12} appears in {n:,} rows")
+"""
+
+#Now let's recheck our coverage and uniqueness after cleanup!
+loc_counts = df["clean_location"].value_counts()
+
+# What fraction of TICKETS do the most common locations cover?
+for top_n in [5_000, 10_000, 20_000, 50_000, 100_000]:
+    coverage = loc_counts.head(top_n).sum() / len(df)
+    print(f"Top {top_n:>7,} clean locations cover {coverage:.1%} of all tickets")
+
+
+# Rank cleaned locations by ticket count
+loc_counts = df["clean_location"].value_counts()
+
+# Take the head that covers ~80%+ of tickets
+TOP_N = 50_000
+geocode_targets = loc_counts.head(TOP_N).index.tolist()
+print(f"Geocoding {TOP_N:,} locations covers "
+      f"{loc_counts.head(TOP_N).sum() / len(df):.1%} of all tickets")
