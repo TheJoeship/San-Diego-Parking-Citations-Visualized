@@ -8,3 +8,5 @@ geocoded_locations.csv
 targets.csv
 data/
 __pycache__/
+*.pyc
+parking_citations_dictionary_datasd.csv

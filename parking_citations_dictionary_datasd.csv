@@ -1,9 +1,0 @@
-﻿field,description
-citation_id,Unique parking citation identification number
-date_issue,The date the parking citation was issued
-date_creation,The date the citation record entered the system
-location,The location of the parking violation as entered by the issuing officer
-sector1,The issuing department/agency. Will be City issued citations only
-vio_code,The State or local code section violated
-vio_desc,The name/description of the violation code
-vio_fine,The citation fine amount
